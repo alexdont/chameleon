@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.alexdont.chameleon",
+  "name": "Chameleon",
+  "version": "1.0.0",
+  "author": "alexdont",
+  "license": "MIT",
+  "description": "Rotates your saved wallpapers on a schedule — and, if you opt in, regenerates the whole system theme to match each new background.",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "overlay"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "overlay": "Overlay.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "Chameleon",
+    "description": "Left-click rotates the wallpaper now; right-click opens schedule and theme-match settings.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

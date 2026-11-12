@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.alexdont.chameleon",
   "name": "Chameleon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "alexdont",
   "license": "MIT",
   "description": "Rotates your saved wallpapers on a schedule — and, if you opt in, regenerates the whole system theme to match each new background.",

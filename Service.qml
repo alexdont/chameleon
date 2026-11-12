@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "ColorUtils.js" as CU
 
-// Headless rotator. Every N minutes it advances the wallpaper:
+// Headless rotator. Every N minutes it picks a new wallpaper at random:
 //
 //   ~/.config/omarchy/chameleon/  (the gallery) holds images? -> rotate those
 //   gallery empty, theme-match off -> omarchy-theme-bg-next (current theme)
@@ -31,6 +31,9 @@ Item {
   property string modePref: "auto"
   property bool paused: false
   property double lastRotatedAt: 0
+  // Basenames shown in the current shuffle cycle; resets when the pool is
+  // exhausted so every image appears once before any repeats.
+  property var seenList: []
 
   property bool loaded: false
   property bool busy: false
@@ -63,6 +66,10 @@ Item {
       root.paused = s.paused === true
       var last = Number(s.lastRotatedAt)
       if (isFinite(last) && last > 0 && last <= Date.now()) root.lastRotatedAt = last
+      if (Array.isArray(s.seen))
+        root.seenList = s.seen.filter(function(x) {
+          return typeof x === "string" && x.length > 0 && x.length <= 200
+        }).slice(0, 1000)
     } catch (e) { /* first run or corrupt file: keep defaults */ }
     if (root.lastRotatedAt === 0) root.lastRotatedAt = Date.now()
     root.loaded = true
@@ -83,7 +90,8 @@ Item {
         themeMatch: root.themeMatch,
         modePref: root.modePref,
         paused: root.paused,
-        lastRotatedAt: root.lastRotatedAt
+        lastRotatedAt: root.lastRotatedAt,
+        seen: root.seenList
       })]
     saveProc.running = true
   }
@@ -107,10 +115,33 @@ Item {
     if (root.themeMatch && !root.busy) reapplyProc.running = true
   }
 
+  // The image an in-flight apply will show; committed to seenList only once
+  // the apply succeeds, so a failed one stays eligible for this cycle.
+  property string pendingSeen: ""
+
   function markRotated() {
+    if (root.pendingSeen !== "" && root.pendingSeen.length <= 200) {
+      if (root.seenList.indexOf(root.pendingSeen) === -1) {
+        var l = root.seenList.slice()
+        l.push(root.pendingSeen)
+        root.seenList = l.slice(-1000)
+      }
+      root.pendingSeen = ""
+    }
     root.lastRotatedAt = Date.now()
     root.nowMs = Date.now()
     root.saveSettings()
+  }
+
+  // Pool entries not yet shown this cycle, the on-screen one excluded.
+  // Matching is by basename: crops and theme staging keep the source name.
+  function unseenIn(pool, curBase) {
+    var out = []
+    for (var i = 0; i < pool.length; i++) {
+      var b = pool[i].slice(pool[i].lastIndexOf("/") + 1)
+      if (b !== curBase && root.seenList.indexOf(b) === -1) out.push(pool[i])
+    }
+    return out
   }
 
   // ---- rotation -----------------------------------------------------------
@@ -135,9 +166,11 @@ Item {
   // $stateDir/crops) so rotation-order matching keeps working; the palette
   // is then derived from the crop, i.e. from what is actually on screen.
   function internalApply(path) {
+    root.pendingSeen = path.slice(path.lastIndexOf("/") + 1)
     var scr = Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
     prepProc.srcPath = path
     prepProc.command = ["bash", "-c",
+      '{\n' +
       'img="$1"; sw="$2"; sh="$3"; cdir="$4"\n' +
       'fallback() { printf "%s" "$img"; exit 0; }\n' +
       '[[ -f $img && $sw -gt 0 && $sh -gt 0 ]] || fallback\n' +
@@ -156,7 +189,8 @@ Item {
       '  ch=$ih; cw=$(( ih * sw / sh )); (( cw <= iw )) || cw=$iw\n' +
       '  max=$(( iw - cw )); y=0; x=$(( RANDOM * max / 32767 ))\n' +
       'fi\n' +
-      'magick "${img}[0]" -crop "${cw}x${ch}+${x}+${y}" +repage -quality 97 "$out" 2>/dev/null && printf "%s" "$out" || fallback',
+      'magick "${img}[0]" -crop "${cw}x${ch}+${x}+${y}" +repage -quality 97 "$out" 2>/dev/null && printf "%s" "$out" || fallback\n' +
+      '} | head -c 4096',
       "bash", path, String(scr ? scr.width : 0), String(scr ? scr.height : 0),
       root.stateDir + "/crops"]
     prepProc.running = true
@@ -165,8 +199,9 @@ Item {
   function continueApply(path) {
     if (root.themeMatch) {
       histProc.imagePath = path
-      histProc.command = ["magick", path, "-resize", "100x100!", "-colors", "12",
-        "-depth", "8", "-format", "%c", "histogram:info:-"]
+      histProc.command = ["bash", "-c",
+        'set -o pipefail; magick "$1" -resize "100x100!" -colors 12 -depth 8 -format "%c" histogram:info:- | head -c 65536',
+        "bash", path]
       histProc.running = true
     } else {
       Quickshell.execDetached(["omarchy-theme-bg-set", path])
@@ -184,6 +219,7 @@ Item {
 
   function finish(err) {
     if (err) {
+      root.pendingSeen = ""
       root.lastError = err
       Quickshell.execDetached(["omarchy-notification-send", "-e", "-u", "critical",
         "Chameleon", err])
@@ -212,25 +248,26 @@ Item {
       return
     }
 
-    // Find the current background in the pool (by path, then by filename —
-    // theme backgrounds get staged into ~/.local/state, so paths can differ).
-    var idx = pool.indexOf(current)
-    if (idx === -1 && current !== "") {
-      var base = current.slice(current.lastIndexOf("/") + 1)
-      for (var j = 0; j < pool.length; j++) {
-        if (pool[j].slice(pool[j].lastIndexOf("/") + 1) === base) { idx = j; break }
-      }
+    // Shuffle cycle: pick at random among the pool images not yet shown this
+    // cycle, so every image appears once before anything repeats; when the
+    // pool is exhausted, a fresh cycle starts (still skipping the one up now).
+    var curBase = current.slice(current.lastIndexOf("/") + 1)
+    var candidates = root.unseenIn(pool, curBase)
+    if (candidates.length === 0) {
+      root.seenList = []
+      root.saveSettings()
+      candidates = root.unseenIn(pool, curBase)
     }
-    var next = pool[(idx + 1) % pool.length]
 
-    if (pool.length === 1 && idx === 0 && !root.themeMatch) {
-      // One image and it is already up: nothing to do.
+    if (candidates.length === 0) {
+      // The pool holds nothing but the image already on screen.
+      if (root.themeMatch && pool.length > 0) { root.internalApply(pool[0]); return }
       root.markRotated()
       root.finish("")
       return
     }
 
-    root.internalApply(next)
+    root.internalApply(candidates[Math.floor(Math.random() * candidates.length)])
   }
 
   function applyGenerated(histText, imagePath) {
@@ -280,7 +317,7 @@ Item {
       '  theme_name=$(cat "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null)\n' +
       '  dirs=("$HOME/.local/state/omarchy/current/theme/backgrounds" "$HOME/.config/omarchy/backgrounds/$theme_name")\n' +
       'fi\n' +
-      '(( ${#dirs[@]} > 0 )) && omarchy-menu-images --selected "$cur" --show-labels "${dirs[@]}"',
+      '(( ${#dirs[@]} > 0 )) && omarchy-menu-images --selected "$cur" --show-labels "${dirs[@]}" | head -c 4096',
       "bash", root.themeMatch ? "1" : "0"]
     pickerProc.running = true
   }
@@ -307,13 +344,24 @@ Item {
     }
   }
 
+  // Bounded, descriptor-safe settings read: ONE descriptor opened with
+  // O_NOFOLLOW (a symlink can't redirect the read) and O_NONBLOCK (a planted
+  // FIFO can't block us), fstat'd as a regular file, and the capped bytes
+  // read from that same descriptor before any parsing. The path is passed
+  // positionally as argv. Real settings are a few KB (the shuffle list is
+  // capped at 1000 names of <= 200 chars). No python3 -> no bytes -> defaults.
   Process {
     id: loadProc
-    command: ["sh", "-c",
-      '{ [ -f "$1" ] && [ ! -L "$1" ] && cat "$1" || true; } | head -c 4096',
-      "sh", root.settingsFile]
+    command: ["python3", "-I", "-c",
+      "import os,sys,stat\n" +
+      "try: fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)\n" +
+      "except OSError: sys.exit(0)\n" +
+      "try:\n" +
+      "    if stat.S_ISREG(os.fstat(fd).st_mode): sys.stdout.buffer.write(os.read(fd,262144))\n" +
+      "finally: os.close(fd)\n",
+      root.settingsFile]
     stdout: StdioCollector {
-      onStreamFinished: root.applyLoaded(text.slice(0, 4096))
+      onStreamFinished: root.applyLoaded(text.slice(0, 262144))
     }
   }
 
@@ -362,7 +410,7 @@ Item {
     property string srcPath: ""
     stdout: StdioCollector {
       onStreamFinished: {
-        var p = String(text || "").trim()
+        var p = String(text || "").slice(0, 4096).trim()
         root.continueApply(p !== "" ? p : prepProc.srcPath)
       }
     }
@@ -372,10 +420,11 @@ Item {
   // change) so the new mode shows without advancing the rotation.
   Process {
     id: reapplyProc
-    command: ["readlink", "-f", root.home + "/.local/state/omarchy/current/background"]
+    command: ["sh", "-c", 'readlink -f "$1" 2>/dev/null | head -c 4096',
+      "sh", root.home + "/.local/state/omarchy/current/background"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var p = String(text || "").trim()
+        var p = String(text || "").slice(0, 4096).trim()
         if (p !== "") root.setWallpaper(p)
       }
     }
@@ -385,7 +434,7 @@ Item {
     id: pickerProc
     stdout: StdioCollector {
       onStreamFinished: {
-        var picked = String(text || "").trim()
+        var picked = String(text || "").slice(0, 4096).trim()
         if (picked !== "") root.setWallpaper(picked)
       }
     }

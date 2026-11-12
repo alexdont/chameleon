@@ -10,7 +10,9 @@ each new background, like a chameleon changing its colors to its surroundings.
   day (your pick). The schedule survives shell restarts: a daily rotation set
   yesterday still fires today.
 - **Your gallery** — drop images into `~/.config/omarchy/chameleon/` and those
-  become the rotation. When the folder is empty, Chameleon rotates the current
+  become the rotation, picked shuffle-style: random order, but every image is
+  shown once before any repeats (the shown set persists across shell
+  restarts). When the folder is empty, Chameleon rotates the current
   theme's own backgrounds (which already match the theme).
 - **Theme-match (opt-in)** — with the toggle on, every new wallpaper is fed
   through ImageMagick, a full Omarchy palette is derived from its dominant
@@ -31,7 +33,7 @@ each new background, like a chameleon changing its colors to its surroundings.
 
 - **Bar widget** — left-click opens the wallpaper picker (Omarchy's native
   thumbnail grid over your rotation pool; the pick still theme-matches);
-  middle-click rotates to the next one; right-click opens settings.
+  middle-click jumps to a random one; right-click opens settings.
   The glyph dims while rotation is paused.
 - **Settings card** — schedule presets, the theme-match toggle, pause,
   choose/rotate-now, and a shortcut to the gallery folder.
@@ -51,13 +53,61 @@ is written to `~/.config/omarchy/themes/chameleon/colors.toml` with the
 wallpaper symlinked as the theme's only background, then applied with
 `omarchy theme set chameleon`.
 
-## Requirements
+## Install
 
-- Omarchy with the Quickshell-based shell (`omarchy-shell`)
-- ImageMagick (`magick`) — preinstalled on Omarchy — for theme-match
+Requires Omarchy 4.x (Quattro) with the Quickshell-based shell.
+
+```bash
+omarchy plugin add https://github.com/alexdont/chameleon.git --enable
+```
+
+Optional keybinding (add to `~/.config/hypr/bindings.lua`):
+
+```lua
+o.bind("SUPER + ALT + W", "Next wallpaper", "omarchy-shell chameleon rotate")
+```
+
+### Dependencies
+
+Everything it needs ships with Omarchy:
+
+- **ImageMagick** (`magick`) — palette extraction for theme-match and the
+  random-pan crops
+- **python3** — a small bounded, symlink-safe reader for the settings file
+- **AVIF wallpapers (optional)** — need Qt's extra image formats:
+  `sudo pacman -S kimageformats`
 
 ## State
 
 Settings live in
 `~/.local/state/omarchy/io.github.alexdont.chameleon/settings.json`.
 Delete the file to reset to defaults (hourly rotation, theme-match off).
+
+## What it writes
+
+Nothing outside its own folders, and nothing system-wide until you opt in:
+
+- `~/.local/state/omarchy/io.github.alexdont.chameleon/` — settings and the
+  random-pan crops
+- `~/.config/omarchy/chameleon/` — your gallery (created only when you open
+  it from the settings card)
+- `~/.config/omarchy/themes/chameleon/` — the generated theme, **only with
+  theme-match turned on**. Your other themes are never edited; switching to
+  any other theme with `omarchy theme set` leaves Chameleon's theme unused.
+
+## Remove
+
+Turn theme-match off (or switch to another theme) first, then:
+
+```bash
+omarchy plugin remove io.github.alexdont.chameleon
+omarchy theme set tokyo-night   # or any other theme, if "chameleon" is still active
+rm -rf ~/.local/state/omarchy/io.github.alexdont.chameleon ~/.config/omarchy/themes/chameleon
+```
+
+The gallery at `~/.config/omarchy/chameleon/` holds your own images, so it is
+left for you to keep or delete.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

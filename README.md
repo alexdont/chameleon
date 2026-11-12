@@ -74,8 +74,8 @@ Everything it needs ships with Omarchy:
 - **ImageMagick** (`magick`) — palette extraction for theme-match and the
   random-pan crops
 - **python3** — a small bounded, symlink-safe reader for the settings file
-- **AVIF wallpapers (optional)** — need Qt's extra image formats:
-  `sudo pacman -S kimageformats`
+- **AVIF wallpapers (optional)** — need Qt's extra image formats, the
+  `kimageformats` package from the Arch repos
 
 ## State
 

@@ -81,7 +81,7 @@ Item {
     if (!root.loaded) return
     if (saveProc.running) { root.savePending = true; return }
     saveProc.command = ["sh", "-c",
-      'd="${1%/*}"; mkdir -p "$d" 2>/dev/null || exit 0; ' +
+      'umask 077; d="${1%/*}"; mkdir -p "$d" 2>/dev/null || exit 0; chmod 700 "$d" 2>/dev/null; ' +
       'tmp=$(mktemp "$d/.settings-XXXXXX") || exit 0; ' +
       'printf "%s" "$2" > "$tmp" && mv -f "$tmp" "$1" || rm -f "$tmp"',
       "sh", root.settingsFile,
@@ -171,7 +171,14 @@ Item {
     prepProc.srcPath = path
     prepProc.command = ["bash", "-c",
       '{\n' +
+      // Crops are copies of the user's pictures: keep them owner-only even
+      // when the originals sit in a private gallery.
+      'umask 077\n' +
       'img="$1"; sw="$2"; sh="$3"; cdir="$4"\n' +
+      // Omarchy's theme switch hardlinks the shown crop into its transition
+      // cache, so the files themselves (incl. older ones) must be 0600 too.
+      'mkdir -p "$cdir" && chmod 700 "${cdir%/*}" "$cdir"\n' +
+      'find "$cdir" -maxdepth 1 -type f -perm /077 -exec chmod go-rwx {} + 2>/dev/null\n' +
       'fallback() { printf "%s" "$img"; exit 0; }\n' +
       '[[ -f $img && $sw -gt 0 && $sh -gt 0 ]] || fallback\n' +
       'case "${img,,}" in *.gif) fallback ;; esac\n' +
@@ -180,7 +187,6 @@ Item {
       'ra=$(( iw * 1000 / ih )); rd=$(( sw * 1000 / sh ))\n' +
       'd=$(( ra > rd ? ra - rd : rd - ra ))\n' +
       '(( d * 100 > rd * 8 )) || fallback\n' +
-      'mkdir -p "$cdir"\n' +
       'out="$cdir/${img##*/}"\n' +
       'if (( ra < rd )); then\n' +
       '  cw=$iw; ch=$(( iw * sh / sw )); (( ch <= ih )) || ch=$ih\n' +
@@ -189,7 +195,7 @@ Item {
       '  ch=$ih; cw=$(( ih * sw / sh )); (( cw <= iw )) || cw=$iw\n' +
       '  max=$(( iw - cw )); y=0; x=$(( RANDOM * max / 32767 ))\n' +
       'fi\n' +
-      'magick "${img}[0]" -crop "${cw}x${ch}+${x}+${y}" +repage -quality 97 "$out" 2>/dev/null && printf "%s" "$out" || fallback\n' +
+      'magick "${img}[0]" -crop "${cw}x${ch}+${x}+${y}" +repage -quality 97 "$out" 2>/dev/null && chmod 600 "$out" && printf "%s" "$out" || fallback\n' +
       '} | head -c 4096',
       "bash", path, String(scr ? scr.width : 0), String(scr ? scr.height : 0),
       root.stateDir + "/crops"]
@@ -302,6 +308,13 @@ Item {
   function openPicker() {
     if (pickerProc.running || root.busy) return
     pickerProc.command = ["bash", "-c",
+      // omarchy-menu-images caches a JPEG preview of every pool image; a
+      // private umask keeps the previews it creates for us owner-only.
+      'umask 077\n' +
+      // ...and its cache folder owner-only, which also hides previews (and
+      // the path index) written before this fix or by other pickers.
+      'icache="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/image-selector"\n' +
+      'mkdir -p "$icache" && chmod 700 "$icache"\n' +
       'cur=$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null)\n' +
       'gal="$HOME/.config/omarchy/chameleon"\n' +
       'has_imgs() { find -L "$1" -maxdepth 1 -type f \\( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.webp" -o -iname "*.bmp" -o -iname "*.avif" \\) 2>/dev/null | grep -q .; }\n' +

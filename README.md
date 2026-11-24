@@ -88,12 +88,18 @@ Delete the file to reset to defaults (hourly rotation, theme-match off).
 Nothing outside its own folders, and nothing system-wide until you opt in:
 
 - `~/.local/state/omarchy/io.github.alexdont.chameleon/` — settings and the
-  random-pan crops
+  random-pan crops, kept owner-only (folder `0700`, files `0600`) since crops
+  are copies of your pictures
 - `~/.config/omarchy/chameleon/` — your gallery (created only when you open
   it from the settings card)
 - `~/.config/omarchy/themes/chameleon/` — the generated theme, **only with
   theme-match turned on**. Your other themes are never edited; switching to
   any other theme with `omarchy theme set` leaves Chameleon's theme unused.
+
+The picker runs Omarchy's own `omarchy-menu-images`, which caches a preview
+of every picture in `~/.cache/omarchy/image-selector/`; Chameleon runs it with
+a private umask and keeps that cache folder `0700`, so previews of a private
+gallery aren't readable by other accounts.
 
 ## Remove
 
